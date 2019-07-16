@@ -65,6 +65,9 @@ static uint8_t nsx, nsy, nmx, nmy, nhx, nhy;                                    
 static uint8_t xMin, yMin, xMax, yMax;                                                             // redraw range
 static uint8_t hh, mm, ss;
 static unsigned long targetTime, sleepTime; // next action time
+#ifdef TFT_BL
+bool ledTurnedOn = false;
+#endif
 #ifdef DEBUG_MODE
 static uint16_t loopCount = 0;
 #endif
@@ -91,7 +94,6 @@ void setup(void)
   pinMode(WAKEUP_PIN, INPUT_PULLUP);
 #ifdef TFT_BL
   pinMode(TFT_BL, OUTPUT);
-  analogWrite(TFT_BL, LED_LEVEL);
 #endif
 
   //draw_round_clock_mark(104, 120, 112, 120, 114, 114);
@@ -156,6 +158,14 @@ void loop()
     osx = nsx;
     osy = nsy;
 
+#ifdef TFT_BL
+    if (!ledTurnedOn)
+    {
+      analogWrite(TFT_BL, LED_LEVEL);
+      ledTurnedOn = true;
+    }
+#endif
+
 #ifdef DEBUG_MODE
     loopCount++;
 #endif
@@ -196,7 +206,10 @@ void read_rtc()
 
 void enterSleep()
 {
+#ifdef TFT_BL
   digitalWrite(TFT_BL, LOW);
+  ledTurnedOn = false;
+#endif
   tft->displayOff();
 
   // Allow wake up pin to trigger interrupt on low.
@@ -209,7 +222,6 @@ void enterSleep()
   // Disable external pin interrupt on wake up pin.
   detachInterrupt(digitalPinToInterrupt(WAKEUP_PIN));
   tft->displayOn();
-  analogWrite(TFT_BL, LED_LEVEL);
 
   // read date and time from RTC
   read_rtc();
