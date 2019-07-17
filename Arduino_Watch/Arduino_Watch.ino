@@ -5,7 +5,13 @@
    - shutdown power after 60 seconds
    - press power button to restart
 */
-#define SLEEP_TIME 60000L /* auto shutdown time (in milliseconds) */
+// real time clock class (RTC_DS1307 / RTC_DS3231 / RTC_PCF8523)
+// comment out if no RTC at all
+#define RTC_CLASS RTC_DS3231
+
+// auto sleep time (in milliseconds)
+// comment out if no need enter sleep, e.g. still in developing stage
+#define SLEEP_TIME 20000L
 #define BACKGROUND BLACK
 #define MARK_COLOR WHITE
 #define SUBMARK_COLOR 0x7BEF //0xBDF7
@@ -24,18 +30,19 @@
 #define RIGHT_ANGLE_RADIAN 1.5707963
 #define CENTER 120
 
-#ifdef ESP32
+#if defined (ESP32)
 #define TFT_CS 5
 #define TFT_DC 16
 #define TFT_RST 17
 #define TFT_BL 22
-#define LED_LEVEL 128
 #else
 #define TFT_DC 19
 #define TFT_RST 18
 #define TFT_BL 10
-#define LED_LEVEL 128
 #endif
+#define TFT_ROTATION 2
+#define TFT_IPS true
+#define LED_LEVEL 128
 
 #define WAKEUP_PIN 7
 
@@ -45,9 +52,25 @@
 #include <Arduino_GFX.h>
 #include <Arduino_TFT.h>
 #include <Arduino_ST7789.h> // Hardware-specific library for ST7789 (with or without CS pin)
+
+#ifdef SLEEP_TIME
+#if defined (ESP32)
+#include <esp_sleep.h>
+#elif defined (__AVR__)
+#include <LowPower.h>
+#endif
+#endif // #ifdef SLEEP_TIME
+
+#ifdef RTC_CLASS
 #include <Wire.h>
 #include "RTClib.h"
-#include <LowPower.h>
+RTC_CLASS rtc;
+#else
+static uint8_t conv2d(const char* p) {
+  uint8_t v = 0;
+  return (10 * (*p - '0')) + (*++p - '0');
+}
+#endif
 
 //You can use different type of hardware initialization
 #ifdef TFT_CS
@@ -55,10 +78,7 @@ Arduino_HWSPI *bus = new Arduino_HWSPI(TFT_DC, TFT_CS);
 #else
 Arduino_HWSPI *bus = new Arduino_HWSPI(TFT_DC); //for display without CS pin
 #endif
-Arduino_ST7789 *tft = new Arduino_ST7789(bus, TFT_RST, 2, 240, 240, 0, 80);
-
-// real time clock library (RTC_DS1307 / RTC_DS3231 / RTC_PCF8523)
-RTC_DS3231 rtc;
+Arduino_ST7789 *tft = new Arduino_ST7789(bus, TFT_RST, TFT_ROTATION, 240, 240, 0, 80, TFT_IPS); // 1.3"/1.5" square IPS LCD
 
 float sdeg, mdeg, hdeg;
 uint8_t osx = CENTER, osy = CENTER, omx = CENTER, omy = CENTER, ohx = CENTER, ohy = CENTER; // Saved H, M, S x & y coords
@@ -81,14 +101,13 @@ void setup(void)
   DEBUG_BEGIN(115200);
   DEBUG_PRINTMLN(": start");
 
-#ifdef ESP32
+#if defined (ESP32)
   tft->begin(80000000);
 #else
   tft->begin();
 #endif
   DEBUG_PRINTMLN(": tft->begin()");
 
-  tft->invertDisplay(true);
   tft->fillScreen(BACKGROUND);
   DEBUG_PRINTMLN(": tft->fillScreen(BACKGROUND)");
 
@@ -102,11 +121,20 @@ void setup(void)
   //draw_square_clock_mark(72, 90, 78, 90, 84, 90);
   DEBUG_PRINTMLN(": Draw 60 clock marks");
 
+#ifdef RTC_CLASS
   // read date and time from RTC
   read_rtc();
+#else
+  hh = conv2d(__TIME__);
+  mm = conv2d(__TIME__ + 3);
+  ss = conv2d(__TIME__ + 6);
+#endif
 
   targetTime = ((millis() / 1000) + 1) * 1000;
+
+#ifdef SLEEP_TIME
   sleepTime = millis() + SLEEP_TIME;
+#endif
 }
 
 void loop()
@@ -161,8 +189,7 @@ void loop()
 #ifdef TFT_BL
     if (!ledTurnedOn)
     {
-      analogWrite(TFT_BL, LED_LEVEL);
-      ledTurnedOn = true;
+      backlight(true);
     }
 #endif
 
@@ -171,6 +198,7 @@ void loop()
 #endif
   }
 
+#ifdef SLEEP_TIME
   if (cur_millis > sleepTime)
   {
     // enter sleep
@@ -183,10 +211,30 @@ void loop()
     enterSleep();
     loopCount = 0;
   }
+#endif
 
   delay(1);
 }
 
+#ifdef TFT_BL
+void backlight(bool enable) {
+  if (enable) {
+#if defined (ESP32)
+    ledcAttachPin(TFT_BL, 1); // assign TFT_BL pin to channel 1
+    ledcSetup(1, 12000, 8); // 12 kHz PWM, 8-bit resolution
+    ledcWrite(1, LED_LEVEL); // brightness 0 - 255
+#else
+    analogWrite(TFT_BL, LED_LEVEL);
+#endif
+    ledTurnedOn = true;
+  } else {
+    digitalWrite(TFT_BL, LOW);
+    ledTurnedOn = false;
+  }
+}
+#endif
+
+#ifdef RTC_CLASS
 void read_rtc()
 {
   Wire.begin();
@@ -203,15 +251,21 @@ void read_rtc()
   DEBUG_PRINTLN(ss);
   Wire.end();
 }
+#endif
 
+#ifdef SLEEP_TIME
 void enterSleep()
 {
 #ifdef TFT_BL
-  digitalWrite(TFT_BL, LOW);
-  ledTurnedOn = false;
+  backlight(false);
 #endif
   tft->displayOff();
 
+#if defined (ESP32)
+  gpio_wakeup_enable(WAKEUP_PIN, GPIO_INTR_LOW_LEVEL);
+  esp_sleep_enable_gpio_wakeup();
+  esp_light_sleep_start();
+#elif defined (__AVR__)
   // Allow wake up pin to trigger interrupt on low.
   attachInterrupt(digitalPinToInterrupt(WAKEUP_PIN), wakeUp, LOW);
 
@@ -221,13 +275,20 @@ void enterSleep()
 
   // Disable external pin interrupt on wake up pin.
   detachInterrupt(digitalPinToInterrupt(WAKEUP_PIN));
+#endif
+
   tft->displayOn();
 
   // read date and time from RTC
+#ifdef RTC_CLASS
   read_rtc();
+#endif
 
+#ifdef SLEEP_TIME
   sleepTime = millis() + SLEEP_TIME;
+#endif
 }
+#endif // #ifdef SLEEP_TIME
 
 void wakeUp()
 {
