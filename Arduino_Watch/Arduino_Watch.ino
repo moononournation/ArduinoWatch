@@ -5,11 +5,11 @@
    - shutdown power after 60 seconds
    - press power button to restart
 */
-// real time clock class (RTC_DS1307 / RTC_DS3231 / RTC_PCF8523)
+// real time clock class
 // comment out if no RTC at all
-//#define RTC_CLASS RTC_DS1307
+// #define RTC_CLASS RTC_DS1307
 #define RTC_CLASS RTC_DS3231
-//#define RTC_CLASS RTC_PCF8523
+// #define RTC_CLASS RTC_PCF8523
 
 // auto sleep time (in milliseconds)
 // comment out if no need enter sleep, e.g. still in developing stage
@@ -38,14 +38,14 @@
 #define TFT_DC 16
 #define TFT_RST 17
 #define TFT_BL 22
+#define WAKEUP_PIN 36
 #else
 #define TFT_DC 19
 #define TFT_RST 18
 #define TFT_BL 10
+#define WAKEUP_PIN 7
 #endif
 #define LED_LEVEL 128
-
-#define WAKEUP_PIN 7
 
 #include "Debug_Printer.h"
 #include <SPI.h>
@@ -64,7 +64,7 @@
 
 #ifdef RTC_CLASS
 #include <Wire.h>
-#include "RTClib.h"
+#include <RTClib.h>
 RTC_CLASS rtc;
 #else
 static uint8_t conv2d(const char *p)
@@ -120,6 +120,7 @@ void setup(void)
   pinMode(TFT_BL, OUTPUT);
 #endif
 
+  // Draw 60 clock marks
   //draw_round_clock_mark(104, 120, 112, 120, 114, 114);
   draw_square_clock_mark(102, 120, 108, 120, 114, 120);
   //draw_square_clock_mark(72, 90, 78, 90, 84, 90);
@@ -214,9 +215,12 @@ void loop()
 #endif
 
     enterSleep();
+
+#ifdef DEBUG_MODE
     loopCount = 0;
-  }
 #endif
+  }
+#endif // #ifdef SLEEP_TIME
 
   delay(1);
 }
@@ -301,12 +305,14 @@ void enterSleep()
   sleepTime = millis() + SLEEP_TIME;
 #endif
 }
-#endif // #ifdef SLEEP_TIME
 
+#if defined(__AVR__)
 void wakeUp()
 {
   // Just a handler for the pin interrupt.
 }
+#endif
+#endif // #ifdef SLEEP_TIME
 
 void draw_round_clock_mark(uint8_t innerR1, uint8_t outerR1, uint8_t innerR2, uint8_t outerR2, uint8_t innerR3, uint8_t outerR3)
 {
@@ -509,59 +515,6 @@ void write_cache_point(uint8_t x, uint8_t y, uint16_t color, bool save, bool act
   if (actual_draw)
   {
     tft->writePixel(x, y, color);
-  }
-}
-
-void cache_line_points(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t points[][2], uint8_t array_size)
-{
-#if defined(ESP8266)
-  yield();
-#endif
-  bool steep = abs(y1 - y0) > abs(x1 - x0);
-  if (steep)
-  {
-    _swap_uint8_t(x0, y0);
-    _swap_uint8_t(x1, y1);
-  }
-
-  if (x0 > x1)
-  {
-    _swap_uint8_t(x0, x1);
-    _swap_uint8_t(y0, y1);
-  }
-
-  uint8_t dx, dy;
-  dx = x1 - x0;
-  dy = abs(y1 - y0);
-
-  uint8_t err = dx / 2;
-  int8_t ystep = (y0 < y1) ? 1 : -1;
-  int i = 0;
-
-  for (; x0 <= x1; x0++)
-  {
-    if (steep)
-    {
-      points[i][0] = y0;
-      points[i][1] = x0;
-    }
-    else
-    {
-      points[i][0] = x0;
-      points[i][1] = y0;
-    }
-    if (err < dy)
-    {
-      y0 += ystep;
-      err += dx;
-    }
-    err -= dy;
-    i++;
-  }
-  for (; i < array_size; i++)
-  {
-    points[i][0] = 0;
-    points[i][1] = 0;
   }
 }
 
