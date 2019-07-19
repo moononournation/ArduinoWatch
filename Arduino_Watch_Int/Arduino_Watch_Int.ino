@@ -5,7 +5,16 @@
    - shutdown power after 60 seconds
    - press power button to restart
 */
-#define SLEEP_TIME 60000L /* auto shutdown time (in milliseconds) */
+// real time clock class (RTC_DS1307 / RTC_DS3231 / RTC_PCF8523)
+// comment out if no RTC at all
+//#define RTC_CLASS RTC_DS1307
+#define RTC_CLASS RTC_DS3231
+//#define RTC_CLASS RTC_PCF8523
+
+// auto sleep time (in milliseconds)
+// comment out if no need enter sleep, e.g. still in developing stage
+#define SLEEP_TIME 20000L
+
 #define BACKGROUND BLACK
 #define MARK_COLOR WHITE
 #define SUBMARK_COLOR 0x7BEF //0xBDF7
@@ -22,18 +31,17 @@
 #define RIGHT_ANGLE_DEGREE 90
 #define CENTER 120
 
-#ifdef ESP32
+#if defined(ESP32)
 #define TFT_CS 5
 #define TFT_DC 16
 #define TFT_RST 17
 #define TFT_BL 22
-#define LED_LEVEL 128
 #else
 #define TFT_DC 19
 #define TFT_RST 18
 #define TFT_BL 10
-#define LED_LEVEL 128
 #endif
+#define LED_LEVEL 128
 
 #define WAKEUP_PIN 7
 
@@ -44,9 +52,26 @@
 #include <Arduino_GFX.h>
 #include <Arduino_TFT.h>
 #include <Arduino_ST7789.h> // Hardware-specific library for ST7789 (with or without CS pin)
+
+#ifdef SLEEP_TIME
+#if defined(ESP32)
+#include <esp_sleep.h>
+#elif defined(__AVR__)
+#include <LowPower.h>
+#endif
+#endif // #ifdef SLEEP_TIME
+
+#ifdef RTC_CLASS
 #include <Wire.h>
 #include "RTClib.h"
-#include <LowPower.h>
+RTC_CLASS rtc;
+#else
+static uint8_t conv2d(const char *p)
+{
+  uint8_t v = 0;
+  return (10 * (*p - '0')) + (*++p - '0');
+}
+#endif
 
 //You can use different type of hardware initialization
 #ifdef TFT_CS
@@ -54,10 +79,8 @@ Arduino_HWSPI *bus = new Arduino_HWSPI(TFT_DC, TFT_CS);
 #else
 Arduino_HWSPI *bus = new Arduino_HWSPI(TFT_DC); //for display without CS pin
 #endif
-Arduino_ST7789 *tft = new Arduino_ST7789(bus, TFT_RST, 2, 240, 240, 0, 80);
-
-// real time clock library (RTC_DS1307 / RTC_DS3231 / RTC_PCF8523)
-RTC_DS3231 rtc;
+Arduino_ST7789 *tft = new Arduino_ST7789(bus, TFT_RST, 2 /* rotation */, 240, 240, 0, 80, true /* IPS */); // 1.3"/1.5" square IPS LCD
+// Arduino_ST7789 *tft = new Arduino_ST7789(bus, TFT_RST, 1 /* rotation */, 240, 320); // 2.4" LCD
 
 static int isdeg, imdeg, ihdeg;
 static uint8_t osx = CENTER, osy = CENTER, omx = CENTER, omy = CENTER, ohx = CENTER, ohy = CENTER; // Saved H, M, S x & y coords
@@ -72,22 +95,22 @@ bool ledTurnedOn = false;
 static uint16_t loopCount = 0;
 #endif
 
-static uint8_t cached_points[HOUR_LEN + 1 + MINUTE_LEN + 1 + SECOND_LEN + 1][2];
+static uint8_t cached_points[(HOUR_LEN + 1 + MINUTE_LEN + 1 + SECOND_LEN + 1) * 2];
 static int cached_points_idx = 0;
+static uint8_t *last_cached_point;
 
 void setup(void)
 {
   DEBUG_BEGIN(115200);
   DEBUG_PRINTMLN(": start");
 
-#ifdef ESP32
+#if defined(ESP32)
   tft->begin(80000000);
 #else
   tft->begin();
 #endif
   DEBUG_PRINTMLN(": tft->begin()");
 
-  tft->invertDisplay(true);
   tft->fillScreen(BACKGROUND);
   DEBUG_PRINTMLN(": tft->fillScreen(BACKGROUND)");
 
@@ -101,11 +124,20 @@ void setup(void)
   //draw_square_clock_mark(72, 90, 78, 90, 84, 90);
   DEBUG_PRINTMLN(": Draw 60 clock marks");
 
+#ifdef RTC_CLASS
   // read date and time from RTC
   read_rtc();
+#else
+  hh = conv2d(__TIME__);
+  mm = conv2d(__TIME__ + 3);
+  ss = conv2d(__TIME__ + 6);
+#endif
 
   targetTime = ((millis() / 1000) + 1) * 1000;
+
+#ifdef SLEEP_TIME
   sleepTime = millis() + SLEEP_TIME;
+#endif
 }
 
 void loop()
@@ -147,9 +179,8 @@ void loop()
     nhy = iSin(ihdeg) * HOUR_LEN / I_SCALE + CENTER;
 
     // redraw hands
-    redraw_hands_cached_lines();
-    // redraw_hands_4_split(spi_raw_overwrite_rect);
-    // redraw_hands_4_split(spi_raw_overwrite_rect_inter_int);
+    // redraw_hands_cached_lines();
+    redraw_hands_cached_draw_and_earse();
 
     ohx = nhx;
     ohy = nhy;
@@ -161,8 +192,7 @@ void loop()
 #ifdef TFT_BL
     if (!ledTurnedOn)
     {
-      analogWrite(TFT_BL, LED_LEVEL);
-      ledTurnedOn = true;
+      backlight(true);
     }
 #endif
 
@@ -171,6 +201,7 @@ void loop()
 #endif
   }
 
+#ifdef SLEEP_TIME
   if (cur_millis > sleepTime)
   {
     // enter sleep
@@ -183,10 +214,34 @@ void loop()
     enterSleep();
     loopCount = 0;
   }
+#endif
 
   delay(1);
 }
 
+#ifdef TFT_BL
+void backlight(bool enable)
+{
+  if (enable)
+  {
+#if defined(ESP32)
+    ledcAttachPin(TFT_BL, 1); // assign TFT_BL pin to channel 1
+    ledcSetup(1, 12000, 8);   // 12 kHz PWM, 8-bit resolution
+    ledcWrite(1, LED_LEVEL);  // brightness 0 - 255
+#else
+    analogWrite(TFT_BL, LED_LEVEL);
+#endif
+    ledTurnedOn = true;
+  }
+  else
+  {
+    digitalWrite(TFT_BL, LOW);
+    ledTurnedOn = false;
+  }
+}
+#endif
+
+#ifdef RTC_CLASS
 void read_rtc()
 {
   Wire.begin();
@@ -201,17 +256,25 @@ void read_rtc()
   DEBUG_PRINT(mm);
   DEBUG_PRINT(":");
   DEBUG_PRINTLN(ss);
+#if not defined(ESP32)
   Wire.end();
+#endif
 }
+#endif
 
+#ifdef SLEEP_TIME
 void enterSleep()
 {
 #ifdef TFT_BL
-  digitalWrite(TFT_BL, LOW);
-  ledTurnedOn = false;
+  backlight(false);
 #endif
   tft->displayOff();
 
+#if defined(ESP32)
+  gpio_wakeup_enable((gpio_num_t)WAKEUP_PIN, GPIO_INTR_LOW_LEVEL);
+  esp_sleep_enable_gpio_wakeup();
+  esp_light_sleep_start();
+#elif defined(__AVR__)
   // Allow wake up pin to trigger interrupt on low.
   attachInterrupt(digitalPinToInterrupt(WAKEUP_PIN), wakeUp, LOW);
 
@@ -221,13 +284,22 @@ void enterSleep()
 
   // Disable external pin interrupt on wake up pin.
   detachInterrupt(digitalPinToInterrupt(WAKEUP_PIN));
+#endif
+
   tft->displayOn();
 
   // read date and time from RTC
+#ifdef RTC_CLASS
   read_rtc();
+#endif
 
+  targetTime = ((millis() / 1000) + 1) * 1000;
+
+#ifdef SLEEP_TIME
   sleepTime = millis() + SLEEP_TIME;
+#endif
 }
+#endif // #ifdef SLEEP_TIME
 
 void wakeUp()
 {
@@ -359,6 +431,7 @@ void draw_square_clock_mark(uint8_t innerR1, uint8_t outerR1, uint8_t innerR2, u
 void redraw_hands_cached_lines()
 {
   cached_points_idx = 0;
+  last_cached_point = cached_points;
   write_cached_line(nhx, nhy, CENTER, CENTER, HOUR_COLOR, true, false);   // cache new hour hand
   write_cached_line(nsx, nsy, CENTER, CENTER, SECOND_COLOR, true, false); // cache new second hand
   tft->startWrite();
@@ -416,18 +489,20 @@ void write_cached_line(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint16_t 
 
 void write_cache_point(uint8_t x, uint8_t y, uint16_t color, bool save, bool actual_draw)
 {
+  uint8_t *current_point = cached_points;
   for (int i = 0; i < cached_points_idx; i++)
   {
-    if ((cached_points[i][0] == x) && (cached_points[i][1] == y))
+    if ((x == *(current_point++)) && (y == *(current_point)))
     {
       return;
     }
+    current_point++;
   }
   if (save)
   {
     cached_points_idx++;
-    cached_points[cached_points_idx][0] = x;
-    cached_points[cached_points_idx][1] = y;
+    *(last_cached_point++) = x;
+    *(last_cached_point++) = y;
   }
   if (actual_draw)
   {
@@ -488,244 +563,112 @@ void cache_line_points(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t p
   }
 }
 
-bool inCachedPoints(uint8_t x, uint8_t y, uint8_t points[][2], int array_size)
-{
-  for (int i = 0; i < array_size; i++)
-  {
-    if ((points[i][0] == x) && (points[i][1] == y))
-    {
-      return true;
-    }
-  }
-  return false;
-}
-
-void redraw_hands_4_split(void (*redrawFunc)())
-{
-  if (inSplitRange(1, 1, CENTER, CENTER))
-  {
-    redrawFunc();
-  }
-
-  if (inSplitRange(CENTER + 1, 1, CENTER * 2, CENTER))
-  {
-    redrawFunc();
-  }
-
-  if (inSplitRange(1, CENTER + 1, CENTER, CENTER * 2))
-  {
-    redrawFunc();
-  }
-
-  if (inSplitRange(CENTER + 1, CENTER + 1, CENTER * 2, CENTER * 2))
-  {
-    redrawFunc();
-  }
-}
-
-void spi_raw_overwrite_rect()
+void redraw_hands_cached_draw_and_earse()
 {
   tft->startWrite();
-  tft->writeAddrWindow(xMin, yMin, xMax - xMin + 1, yMax - yMin + 1);
-  for (uint8_t y = yMin; y <= yMax; y++)
-  {
-    for (uint8_t x = xMin; x <= xMax; x++)
-    {
-      if (inLine(x, y, nsx, nsy, CENTER, CENTER))
-      {
-        tft->writeColor(SECOND_COLOR); // draw second hand
-      }
-      else if (inLine(x, y, nhx, nhy, CENTER, CENTER))
-      {
-        tft->writeColor(HOUR_COLOR); // draw hour hand
-      }
-      else if (inLine(x, y, nmx, nmy, CENTER, CENTER))
-      {
-        tft->writeColor(MINUTE_COLOR); // draw minute hand
-      }
-      else
-      {
-        tft->writeColor(BACKGROUND); // over write background color
-      }
-    }
-  }
+  draw_and_earse_cached_line(CENTER, CENTER, nsx, nsy, SECOND_COLOR, cached_points, SECOND_LEN + 1, false, false);
+  draw_and_earse_cached_line(CENTER, CENTER, nhx, nhy, HOUR_COLOR, cached_points + ((SECOND_LEN + 1) * 2), HOUR_LEN + 1, true, false);
+  draw_and_earse_cached_line(CENTER, CENTER, nmx, nmy, MINUTE_COLOR, cached_points + ((SECOND_LEN + 1 + HOUR_LEN + 1) * 2), MINUTE_LEN + 1, true, true);
   tft->endWrite();
 }
 
-void spi_raw_overwrite_rect_inter_int()
+void draw_and_earse_cached_line(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint16_t color, uint8_t *cache, uint16_t cache_len, bool cross_check_second, bool cross_check_hour)
 {
-  tft->startWrite();
-  tft->writeAddrWindow(xMin, yMin, xMax - xMin + 1, yMax - yMin + 1);
-  for (uint8_t y = yMin; y <= yMax; y++)
+#if defined(ESP8266)
+  yield();
+#endif
+  bool steep = _diff(y1, y0) > _diff(x1, x0);
+  if (steep)
   {
-    for (uint8_t x = xMin; x <= xMax; x++)
+    _swap_uint8_t(x0, y0);
+    _swap_uint8_t(x1, y1);
+  }
+
+  uint8_t dx, dy;
+  dx = _diff(x1, x0);
+  dy = _diff(y1, y0);
+
+  uint8_t err = dx / 2;
+  int8_t xstep = (x0 < x1) ? 1 : -1;
+  int8_t ystep = (y0 < y1) ? 1 : -1;
+  x1 += xstep;
+  uint8_t x, y, ox, oy;
+  for (uint16_t i = 0; i <= dx; i++)
+  {
+    if (steep)
     {
-      if (inLineInterInt(x, y, nsx, nsy, CENTER, CENTER))
+      x = y0;
+      y = x0;
+    }
+    else
+    {
+      x = x0;
+      y = y0;
+    }
+    ox = *(cache + (i * 2));
+    oy = *(cache + (i * 2) + 1);
+    if ((x == ox) && (y == oy))
+    {
+      if (cross_check_second || cross_check_hour)
       {
-        tft->writeColor(SECOND_COLOR); // draw second hand
-      }
-      else if (inLineInterInt(x, y, nhx, nhy, CENTER, CENTER))
-      {
-        tft->writeColor(HOUR_COLOR); // draw hour hand
-      }
-      else if (inLineInterInt(x, y, nmx, nmy, CENTER, CENTER))
-      {
-        tft->writeColor(MINUTE_COLOR); // draw minute hand
-      }
-      else
-      {
-        tft->writeColor(BACKGROUND); // over write background color
+        write_cache_pixel(x, y, color, cross_check_second, cross_check_hour);
       }
     }
-  }
-  tft->endWrite();
-}
-
-bool inSplitRange(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1)
-{
-  bool in_range = false;
-
-  xMin = CENTER;
-  yMin = CENTER;
-  xMax = CENTER;
-  yMax = CENTER;
-
-  if (_ordered_in_range(ohx, x0, x1) && _ordered_in_range(ohy, y0, y1))
-  {
-    in_range = true;
-    xMin = min(xMin, ohx);
-    xMax = max(xMax, ohx);
-    yMin = min(yMin, ohy);
-    yMax = max(yMax, ohy);
-  }
-
-  if (_ordered_in_range(omx, x0, x1) && _ordered_in_range(omy, y0, y1))
-  {
-    in_range = true;
-    xMin = min(xMin, omx);
-    xMax = max(xMax, omx);
-    yMin = min(yMin, omy);
-    yMax = max(yMax, omy);
-  }
-
-  if (_ordered_in_range(osx, x0, x1) && _ordered_in_range(osy, y0, y1))
-  {
-    in_range = true;
-    xMin = min(xMin, osx);
-    xMax = max(xMax, osx);
-    yMin = min(yMin, osy);
-    yMax = max(yMax, osy);
-  }
-
-  if (_ordered_in_range(nhx, x0, x1) && _ordered_in_range(nhy, y0, y1))
-  {
-    in_range = true;
-    xMin = min(xMin, nhx);
-    xMax = max(xMax, nhx);
-    yMin = min(yMin, nhy);
-    yMax = max(yMax, nhy);
-  }
-
-  if (_ordered_in_range(nmx, x0, x1) && _ordered_in_range(nmy, y0, y1))
-  {
-    in_range = true;
-    xMin = min(xMin, nmx);
-    xMax = max(xMax, nmx);
-    yMin = min(yMin, nmy);
-    yMax = max(yMax, nmy);
-  }
-
-  if (_ordered_in_range(nsx, x0, x1) && _ordered_in_range(nsy, y0, y1))
-  {
-    in_range = true;
-    xMin = min(xMin, nsx);
-    xMax = max(xMax, nsx);
-    yMin = min(yMin, nsy);
-    yMax = max(yMax, nsy);
-  }
-
-  return in_range;
-}
-
-bool inLine(uint8_t x, uint8_t y, uint8_t lx0, uint8_t ly0, uint8_t lx1, uint8_t ly1)
-{
-  // range checking
-  if (!_in_range(x, lx0, lx1))
-  {
-    return false;
-  }
-  if (!_in_range(y, ly0, ly1))
-  {
-    return false;
-  }
-
-  uint8_t dx = _diff(lx1, lx0);
-  uint8_t dy = _diff(ly1, ly0);
-
-  if (dy > dx)
-  {
-    _swap_uint8_t(dx, dy);
-    _swap_uint8_t(x, y);
-    _swap_uint8_t(lx0, ly0);
-    _swap_uint8_t(lx1, ly1);
-  }
-
-  if (lx0 > lx1)
-  {
-    _swap_uint8_t(lx0, lx1);
-    _swap_uint8_t(ly0, ly1);
-  }
-
-  uint8_t err = dx >> 1;
-  int8_t ystep = (ly0 < ly1) ? 1 : -1;
-  for (; lx0 <= x; lx0++)
-  {
+    else
+    {
+      write_cache_pixel(x, y, color, cross_check_second, cross_check_hour);
+      if ((ox > 0) || (oy > 0)) {
+        write_cache_pixel(ox, oy, BACKGROUND, cross_check_second, cross_check_hour);
+      }
+      *(cache + (i * 2)) = x;
+      *(cache + (i * 2) + 1) = y;
+    }
     if (err < dy)
     {
-      ly0 += ystep;
+      y0 += ystep;
       err += dx;
     }
     err -= dy;
+    x0 += xstep;
   }
-
-  return (y == ly0);
+  for (uint16_t i = dx + 1; i < cache_len; i++)
+  {
+    ox = *(cache + (i * 2));
+    oy = *(cache + (i * 2) + 1);
+    if ((ox > 0) || (oy > 0))
+    {
+      write_cache_pixel(ox, oy, BACKGROUND, cross_check_second, cross_check_hour);
+    }
+    *(cache + (i * 2)) = 0;
+    *(cache + (i * 2) + 1) = 0;
+  }
 }
 
-bool inLineInterInt(uint8_t x, uint8_t y, uint8_t lx0, uint8_t ly0, uint8_t lx1, uint8_t ly1)
+void write_cache_pixel(uint8_t x, uint8_t y, uint16_t color, bool cross_check_second, bool cross_check_hour)
 {
-  // range checking
-  if (!_in_range(x, lx0, lx1))
+  uint8_t *cache = cached_points;
+  if (cross_check_second)
   {
-    return false;
+    for (int i = 0; i <= SECOND_LEN; i++)
+    {
+      if ((x == *(cache++)) && (y == *(cache)))
+      {
+        return;
+      }
+      cache++;
+    }
   }
-  if (!_in_range(y, ly0, ly1))
+  if (cross_check_hour)
   {
-    return false;
+    cache = cached_points + ((SECOND_LEN + 1) * 2);
+    for (int i = 0; i <= HOUR_LEN; i++)
+    {
+      if ((x == *(cache++)) && (y == *(cache)))
+      {
+        return;
+      }
+      cache++;
+    }
   }
-
-  uint8_t dx = _diff(lx1, lx0);
-  uint8_t dy = _diff(ly1, ly0);
-
-  if (dy > dx)
-  {
-    _swap_uint8_t(dx, dy);
-    _swap_uint8_t(x, y);
-    _swap_uint8_t(lx0, ly0);
-    _swap_uint8_t(lx1, ly1);
-  }
-
-  if (lx0 > lx1)
-  {
-    _swap_uint8_t(lx0, lx1);
-    _swap_uint8_t(ly0, ly1);
-  }
-
-  if (ly0 < ly1)
-  {
-    return (y == (ly0 + ((x - lx0) * dy / dx)));
-  }
-  else
-  {
-    return (y == (ly0 - ((x - lx0) * dy / dx)));
-  }
+  tft->writePixel(x, y, color);
 }

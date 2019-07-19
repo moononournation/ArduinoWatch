@@ -23,12 +23,13 @@
 #define TFT_CS 5
 #define TFT_DC 16
 #define TFT_RST 17
+#define TFT_BL 22
 #else
 #define TFT_DC 19
 #define TFT_RST 18
 #define TFT_BL 10
-#define LED_LEVEL 128
 #endif
+#define LED_LEVEL 128
 
 #include "Debug_Printer.h"
 #include "IntTrigonometry.h"
@@ -44,7 +45,8 @@ Arduino_HWSPI *bus = new Arduino_HWSPI(TFT_DC, TFT_CS);
 #else
 Arduino_HWSPI *bus = new Arduino_HWSPI(TFT_DC); //for display without CS pin
 #endif
-Arduino_ST7789 *tft = new Arduino_ST7789(bus, TFT_RST, 2, 240, 240, 0, 80);
+Arduino_ST7789 *tft = new Arduino_ST7789(bus, TFT_RST, 2 /* rotation */, 240, 240, 0, 80, true /* IPS */); // 1.3"/1.5" square IPS LCD
+// Arduino_ST7789 *tft = new Arduino_ST7789(bus, TFT_RST, 1 /* rotation */, 240, 320); // 2.4" LCD
 
 static float sdeg, mdeg, hdeg;
 static int isdeg, imdeg, ihdeg;
@@ -56,11 +58,9 @@ static uint8_t hh = 0, mm = 0, ss = 0;
 static uint8_t tmp;
 static uint16_t drawCount;
 
-static uint8_t cached_points[HOUR_LEN + 1 + MINUTE_LEN + 1 + SECOND_LEN + 1][2];
+static uint8_t cached_points[(HOUR_LEN + 1 + MINUTE_LEN + 1 + SECOND_LEN + 1) * 2];
 static int cached_points_idx = 0;
-static uint8_t cached_hour_points[HOUR_LEN + 1][2];
-static uint8_t cached_minute_points[MINUTE_LEN + 1][2];
-static uint8_t cached_second_points[SECOND_LEN + 1][2];
+static uint8_t *last_cached_point;
 
 void setup(void)
 {
@@ -73,15 +73,20 @@ void setup(void)
   tft->begin();
 #endif
   DEBUG_PRINTMLN(": tft->begin()");
-  tft->invertDisplay(true);
 
   tft->fillScreen(BACKGROUND);
   DEBUG_PRINTMLN(": tft->fillScreen(BACKGROUND)");
 
 #ifdef TFT_BL
   pinMode(TFT_BL, OUTPUT);
+#if defined(ESP32)
+  ledcAttachPin(TFT_BL, 1); // assign TFT_BL pin to channel 1
+  ledcSetup(1, 12000, 8);   // 12 kHz PWM, 8-bit resolution
+  ledcWrite(1, LED_LEVEL);  // brightness 0 - 255
+#else
   analogWrite(TFT_BL, LED_LEVEL);
 #endif
+#endif // #ifdef TFT_BL
 
   //draw_round_clock_mark(104, 120, 112, 120, 114, 114);
   draw_square_clock_mark(102, 120, 108, 120, 114, 120);
@@ -179,40 +184,43 @@ void loop()
   DEBUG_PRINT(", TotalMs: ");
   DEBUG_PRINTLN(millis() - startMillis);
 
-  for (uint8_t test_idx = 0; test_idx < 10; test_idx++)
+  for (uint8_t test_idx = 0; test_idx < 11; test_idx++)
   {
     switch (test_idx)
     {
-      case 0:
-        DEBUG_PRINTMLN(": redraw_hands_erase_and_draw();");
-        break;
-      case 1:
-        DEBUG_PRINTMLN(": redraw_hands_cached_lines();");
-        break;
-      case 2:
-        DEBUG_PRINTMLN(": redraw_hands_rect(overwrite_rect_no_draw_float);");
-        break;
-      case 3:
-        DEBUG_PRINTMLN(": redraw_hands_rect(overwrite_rect_no_draw_int);");
-        break;
-      case 4:
-        DEBUG_PRINTMLN(": redraw_hands_rect(overwrite_rect_no_draw);");
-        break;
-      case 5:
-        DEBUG_PRINTMLN(": redraw_hands_rect(overwrite_rect);");
-        break;
-      case 6:
-        DEBUG_PRINTMLN(": redraw_hands_4_split(overwrite_rect);");
-        break;
-      case 7:
-        DEBUG_PRINTMLN(": redraw_hands_4_split(draw_and_erase);");
-        break;
-      case 8:
-        DEBUG_PRINTMLN(": redraw_hands_4_split(spi_raw_overwrite_rect);");
-        break;
-      case 9:
-        DEBUG_PRINTMLN(": redraw_hands_4_split(spi_raw_cache_overwrite_rect);");
-        break;
+    case 0:
+      DEBUG_PRINTMLN(": redraw_hands_erase_and_draw();");
+      break;
+    case 1:
+      DEBUG_PRINTMLN(": redraw_hands_cached_lines();");
+      break;
+    case 2:
+      DEBUG_PRINTMLN(": redraw_hands_cached_draw_and_earse();");
+      break;
+    case 3:
+      DEBUG_PRINTMLN(": redraw_hands_rect(overwrite_rect_no_draw_float);");
+      break;
+    case 4:
+      DEBUG_PRINTMLN(": redraw_hands_rect(overwrite_rect_no_draw_int);");
+      break;
+    case 5:
+      DEBUG_PRINTMLN(": redraw_hands_rect(overwrite_rect_no_draw);");
+      break;
+    case 6:
+      DEBUG_PRINTMLN(": redraw_hands_rect(overwrite_rect);");
+      break;
+    case 7:
+      DEBUG_PRINTMLN(": redraw_hands_4_split(overwrite_rect);");
+      break;
+    case 8:
+      DEBUG_PRINTMLN(": redraw_hands_4_split(draw_and_erase);");
+      break;
+    case 9:
+      DEBUG_PRINTMLN(": redraw_hands_4_split(spi_raw_overwrite_rect);");
+      break;
+    case 10:
+      DEBUG_PRINTMLN(": redraw_hands_4_split(spi_raw_cache_overwrite_rect);");
+      break;
     }
     startMillis = millis();
     maxLoopMs = 0;
@@ -244,39 +252,42 @@ void loop()
 
         switch (test_idx)
         {
-          case 0:
-            redraw_hands_erase_and_draw();
-            break;
-          case 1:
-            redraw_hands_cached_lines();
-            break;
-          case 2:
-            redraw_hands_rect(overwrite_rect_no_draw_float);
-            break;
-          case 3:
-            redraw_hands_rect(overwrite_rect_no_draw_int);
-            break;
-          case 4:
-            redraw_hands_rect(overwrite_rect_no_draw);
-            break;
-          case 5:
-            redraw_hands_rect(overwrite_rect);
-            break;
-          case 6:
-            redraw_hands_4_split(overwrite_rect);
-            break;
-          case 7:
-            redraw_hands_4_split(draw_and_erase);
-            break;
-          case 8:
-            redraw_hands_4_split(spi_raw_overwrite_rect);
-            break;
-          case 9:
-            cache_line_points(nsx, nsy, CENTER, CENTER, cached_second_points, SECOND_LEN + 1);
-            cache_line_points(nhx, nhy, CENTER, CENTER, cached_hour_points, HOUR_LEN + 1);
-            cache_line_points(nmx, nmy, CENTER, CENTER, cached_minute_points, MINUTE_LEN + 1);
-            redraw_hands_4_split(spi_raw_cache_overwrite_rect);
-            break;
+        case 0:
+          redraw_hands_erase_and_draw();
+          break;
+        case 1:
+          redraw_hands_cached_lines();
+          break;
+        case 2:
+          redraw_hands_cached_draw_and_earse();
+          break;
+        case 3:
+          redraw_hands_rect(overwrite_rect_no_draw_float);
+          break;
+        case 4:
+          redraw_hands_rect(overwrite_rect_no_draw_int);
+          break;
+        case 5:
+          redraw_hands_rect(overwrite_rect_no_draw);
+          break;
+        case 6:
+          redraw_hands_rect(overwrite_rect);
+          break;
+        case 7:
+          redraw_hands_4_split(overwrite_rect);
+          break;
+        case 8:
+          redraw_hands_4_split(draw_and_erase);
+          break;
+        case 9:
+          redraw_hands_4_split(spi_raw_overwrite_rect);
+          break;
+        case 10:
+          cache_line_points(nsx, nsy, CENTER, CENTER, cached_points, SECOND_LEN + 1);
+          cache_line_points(nhx, nhy, CENTER, CENTER, cached_points + ((SECOND_LEN + 1) * 2), HOUR_LEN + 1);
+          cache_line_points(nmx, nmy, CENTER, CENTER, cached_points + ((SECOND_LEN + 1 + HOUR_LEN + 1) * 2), MINUTE_LEN + 1);
+          redraw_hands_4_split(spi_raw_cache_overwrite_rect);
+          break;
         }
         ohx = nhx;
         ohy = nhy;
@@ -472,20 +483,20 @@ void redraw_hands_4_split(void (*redrawFunc)())
 void redraw_hands_cached_lines()
 {
   cached_points_idx = 0;
-  write_cached_line(nsx, nsy, CENTER, CENTER, SECOND_COLOR, false);
-  write_cached_line(nhx, nhy, CENTER, CENTER, HOUR_COLOR, false);
-  write_cached_line(nmx, nmy, CENTER, CENTER, MINUTE_COLOR, false);
+  last_cached_point = cached_points;
+  write_cached_line(nhx, nhy, CENTER, CENTER, HOUR_COLOR, true, false);   // cache new hour hand
+  write_cached_line(nsx, nsy, CENTER, CENTER, SECOND_COLOR, true, false); // cache new second hand
   tft->startWrite();
-  write_cached_line(omx, omy, CENTER, CENTER, BACKGROUND, true);
-  tft->writeLine(nmx, nmy, CENTER, CENTER, MINUTE_COLOR);
-  write_cached_line(ohx, ohy, CENTER, CENTER, BACKGROUND, true);
-  tft->writeLine(nhx, nhy, CENTER, CENTER, HOUR_COLOR);
-  write_cached_line(osx, osy, CENTER, CENTER, BACKGROUND, true);
-  tft->writeLine(nsx, nsy, CENTER, CENTER, SECOND_COLOR);
+  write_cached_line(nmx, nmy, CENTER, CENTER, MINUTE_COLOR, true, true); // cache and draw new minute hand
+  write_cached_line(omx, omy, CENTER, CENTER, BACKGROUND, false, true);  // earse old minute hand
+  tft->writeLine(nhx, nhy, CENTER, CENTER, HOUR_COLOR);                  // draw new hour hand
+  write_cached_line(ohx, ohy, CENTER, CENTER, BACKGROUND, false, true);  // earse old hour hand
+  tft->writeLine(nsx, nsy, CENTER, CENTER, SECOND_COLOR);                // draw new second hand
+  write_cached_line(osx, osy, CENTER, CENTER, BACKGROUND, false, true);  // earse old second hand
   tft->endWrite();
 }
 
-void write_cached_line(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint16_t color, bool actual_draw)
+void write_cached_line(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint16_t color, bool save, bool actual_draw)
 {
 #if defined(ESP8266)
   yield();
@@ -513,11 +524,11 @@ void write_cached_line(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint16_t 
   {
     if (steep)
     {
-      write_cache_point(y0, x0, color, actual_draw);
+      write_cache_point(y0, x0, color, save, actual_draw);
     }
     else
     {
-      write_cache_point(x0, y0, color, actual_draw);
+      write_cache_point(x0, y0, color, save, actual_draw);
     }
     if (err < dy)
     {
@@ -528,28 +539,30 @@ void write_cached_line(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint16_t 
   }
 }
 
-void write_cache_point(uint8_t x, uint8_t y, uint16_t color, bool actual_draw)
+void write_cache_point(uint8_t x, uint8_t y, uint16_t color, bool save, bool actual_draw)
 {
+  uint8_t *current_point = cached_points;
   for (int i = 0; i < cached_points_idx; i++)
   {
-    if ((cached_points[i][0] == x) && (cached_points[i][1] == y))
+    if ((x == *(current_point++)) && (y == *(current_point)))
     {
       return;
     }
+    current_point++;
+  }
+  if (save)
+  {
+    cached_points_idx++;
+    *(last_cached_point++) = x;
+    *(last_cached_point++) = y;
   }
   if (actual_draw)
   {
     tft->writePixel(x, y, color);
   }
-  else
-  {
-    cached_points_idx++;
-    cached_points[cached_points_idx][0] = x;
-    cached_points[cached_points_idx][1] = y;
-  }
 }
 
-void cache_line_points(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t points[][2], uint8_t array_size)
+void cache_line_points(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t *cache, uint8_t cache_size)
 {
 #if defined(ESP8266)
   yield();
@@ -573,19 +586,18 @@ void cache_line_points(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t p
 
   uint8_t err = dx / 2;
   int8_t ystep = (y0 < y1) ? 1 : -1;
-  int i = 0;
 
   for (; x0 <= x1; x0++)
   {
     if (steep)
     {
-      points[i][0] = y0;
-      points[i][1] = x0;
+      *(cache++) = y0;
+      *(cache++) = x0;
     }
     else
     {
-      points[i][0] = x0;
-      points[i][1] = y0;
+      *(cache++) = x0;
+      *(cache++) = y0;
     }
     if (err < dy)
     {
@@ -593,22 +605,133 @@ void cache_line_points(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t p
       err += dx;
     }
     err -= dy;
-    i++;
   }
-  for (; i < array_size; i++) {
-    points[i][0] = 0;
-    points[i][1] = 0;
+  for (int i = x0 + 1; i < cache_size; i++)
+  {
+    *(cache++) = 0;
+    *(cache++) = 0;
   }
 }
 
-bool inCachedPoints(uint8_t x, uint8_t y, uint8_t points[][2], int array_size)
+void redraw_hands_cached_draw_and_earse()
 {
-  for (int i = 0; i < array_size; i++)
+  tft->startWrite();
+  draw_and_earse_cached_line(CENTER, CENTER, nsx, nsy, SECOND_COLOR, cached_points, SECOND_LEN + 1, false, false);
+  draw_and_earse_cached_line(CENTER, CENTER, nhx, nhy, HOUR_COLOR, cached_points + ((SECOND_LEN + 1) * 2), HOUR_LEN + 1, true, false);
+  draw_and_earse_cached_line(CENTER, CENTER, nmx, nmy, MINUTE_COLOR, cached_points + ((SECOND_LEN + 1 + HOUR_LEN + 1) * 2), MINUTE_LEN + 1, true, true);
+  tft->endWrite();
+}
+
+void draw_and_earse_cached_line(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint16_t color, uint8_t *cache, uint16_t cache_len, bool cross_check_second, bool cross_check_hour)
+{
+#if defined(ESP8266)
+  yield();
+#endif
+  bool steep = _diff(y1, y0) > _diff(x1, x0);
+  if (steep)
   {
-    if ((points[i][0] == x) && (points[i][1] == y))
+    _swap_uint8_t(x0, y0);
+    _swap_uint8_t(x1, y1);
+  }
+
+  uint8_t dx, dy;
+  dx = _diff(x1, x0);
+  dy = _diff(y1, y0);
+
+  uint8_t err = dx / 2;
+  int8_t xstep = (x0 < x1) ? 1 : -1;
+  int8_t ystep = (y0 < y1) ? 1 : -1;
+  x1 += xstep;
+  uint8_t x, y, ox, oy;
+  for (uint16_t i = 0; i <= dx; i++)
+  {
+    if (steep)
+    {
+      x = y0;
+      y = x0;
+    }
+    else
+    {
+      x = x0;
+      y = y0;
+    }
+    ox = *(cache + (i * 2));
+    oy = *(cache + (i * 2) + 1);
+    if ((x == ox) && (y == oy))
+    {
+      if (cross_check_second || cross_check_hour)
+      {
+        write_cache_pixel(x, y, color, cross_check_second, cross_check_hour);
+      }
+    }
+    else
+    {
+      write_cache_pixel(x, y, color, cross_check_second, cross_check_hour);
+      if ((ox > 0) || (oy > 0)) {
+        write_cache_pixel(ox, oy, BACKGROUND, cross_check_second, cross_check_hour);
+      }
+      *(cache + (i * 2)) = x;
+      *(cache + (i * 2) + 1) = y;
+    }
+    if (err < dy)
+    {
+      y0 += ystep;
+      err += dx;
+    }
+    err -= dy;
+    x0 += xstep;
+  }
+  for (uint16_t i = dx + 1; i < cache_len; i++)
+  {
+    ox = *(cache + (i * 2));
+    oy = *(cache + (i * 2) + 1);
+    if ((ox > 0) || (oy > 0))
+    {
+      write_cache_pixel(ox, oy, BACKGROUND, cross_check_second, cross_check_hour);
+    }
+    *(cache + (i * 2)) = 0;
+    *(cache + (i * 2) + 1) = 0;
+  }
+}
+
+void write_cache_pixel(uint8_t x, uint8_t y, uint16_t color, bool cross_check_second, bool cross_check_hour)
+{
+  uint8_t *cache = cached_points;
+  if (cross_check_second)
+  {
+    for (int i = 0; i <= SECOND_LEN; i++)
+    {
+      if ((x == *(cache++)) && (y == *(cache)))
+      {
+        return;
+      }
+      cache++;
+    }
+  }
+  if (cross_check_hour)
+  {
+    cache = cached_points + ((SECOND_LEN + 1) * 2);
+    for (int i = 0; i <= HOUR_LEN; i++)
+    {
+      if ((x == *(cache++)) && (y == *(cache)))
+      {
+        return;
+      }
+      cache++;
+    }
+  }
+  tft->writePixel(x, y, color);
+}
+
+bool inCachedPoints(uint8_t x, uint8_t y, uint8_t *cache, int cache_size)
+{
+  for (int i = 0; i < cache_size; i++)
+  {
+    if ((x == *(cache++)) && (y == *(cache)))
     {
       return true;
     }
+    cache++;
   }
   return false;
 }
@@ -743,15 +866,15 @@ void spi_raw_cache_overwrite_rect()
   {
     for (uint8_t x = xMin; x <= xMax; x++)
     {
-      if (inCachedPoints(x, y, cached_second_points, SECOND_LEN + 1))
+      if (inCachedPoints(x, y, cached_points, SECOND_LEN + 1))
       {
         tft->writeColor(SECOND_COLOR); // draw second hand
       }
-      else if (inCachedPoints(x, y, cached_hour_points, HOUR_LEN + 1))
+      else if (inCachedPoints(x, y, cached_points + ((SECOND_LEN + 1) * 2), HOUR_LEN + 1))
       {
         tft->writeColor(HOUR_COLOR); // draw hour hand
       }
-      else if (inCachedPoints(x, y, cached_minute_points, MINUTE_LEN + 1))
+      else if (inCachedPoints(x, y, cached_points + ((SECOND_LEN + 1 + HOUR_LEN + 1) * 2), MINUTE_LEN + 1))
       {
         tft->writeColor(MINUTE_COLOR); // draw minute hand
       }
@@ -783,8 +906,7 @@ void draw_and_erase()
       {
         tft->writePixel(x, y, MINUTE_COLOR); // draw minute hand
       }
-      else if (
-        (inLine(x, y, osx, osy, CENTER, CENTER)) || (inLine(x, y, ohx, ohy, CENTER, CENTER)) || (inLine(x, y, omx, omy, CENTER, CENTER)))
+      else if ((inLine(x, y, osx, osy, CENTER, CENTER)) || (inLine(x, y, ohx, ohy, CENTER, CENTER)) || (inLine(x, y, omx, omy, CENTER, CENTER)))
       {
         tft->writePixel(x, y, BACKGROUND); // erase with background color
       }
