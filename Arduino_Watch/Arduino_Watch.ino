@@ -17,13 +17,13 @@
 
 #define BACKGROUND BLACK
 #define MARK_COLOR WHITE
-#define SUBMARK_COLOR 0x7BEF //0xBDF7
+#define SUBMARK_COLOR DARKGREY // LIGHTGREY
 #define HOUR_COLOR WHITE
-#define MINUTE_COLOR BLUE // 0x7BEF
+#define MINUTE_COLOR BLUE // LIGHTGREY
 #define SECOND_COLOR RED
 
-#define HOUR_LEN 50
-#define MINUTE_LEN 90
+#define HOUR_LEN 45
+#define MINUTE_LEN 85
 #define SECOND_LEN 100
 
 #define SIXTIETH 0.016666667
@@ -44,6 +44,7 @@
 #define TFT_RST 18
 #define TFT_BL 10
 #define WAKEUP_PIN 7
+#define RTC_EN_PIN 4
 #endif
 #define LED_LEVEL 128
 
@@ -183,7 +184,7 @@ void loop()
     // redraw hands
     // redraw_hands_4_split(spi_raw_overwrite_rect);
     // redraw_hands_cached_lines();
-    redraw_hands_cached_draw_and_earse();
+    redraw_hands_cached_draw_and_erase();
 
     ohx = nhx;
     ohy = nhy;
@@ -250,6 +251,10 @@ void backlight(bool enable)
 #ifdef RTC_CLASS
 void read_rtc()
 {
+#ifdef RTC_EN_PIN
+  pinMode(RTC_EN_PIN, OUTPUT);
+  digitalWrite(RTC_EN_PIN, HIGH);
+#endif
   Wire.begin();
   rtc.begin();
   DateTime now = rtc.now();
@@ -444,11 +449,11 @@ void redraw_hands_cached_lines()
   write_cached_line(nsx, nsy, CENTER, CENTER, SECOND_COLOR, true, false); // cache new second hand
   tft->startWrite();
   write_cached_line(nmx, nmy, CENTER, CENTER, MINUTE_COLOR, true, true); // cache and draw new minute hand
-  write_cached_line(omx, omy, CENTER, CENTER, BACKGROUND, false, true);  // earse old minute hand
+  write_cached_line(omx, omy, CENTER, CENTER, BACKGROUND, false, true);  // erase old minute hand
   tft->writeLine(nhx, nhy, CENTER, CENTER, HOUR_COLOR);                  // draw new hour hand
-  write_cached_line(ohx, ohy, CENTER, CENTER, BACKGROUND, false, true);  // earse old hour hand
+  write_cached_line(ohx, ohy, CENTER, CENTER, BACKGROUND, false, true);  // erase old hour hand
   tft->writeLine(nsx, nsy, CENTER, CENTER, SECOND_COLOR);                // draw new second hand
-  write_cached_line(osx, osy, CENTER, CENTER, BACKGROUND, false, true);  // earse old second hand
+  write_cached_line(osx, osy, CENTER, CENTER, BACKGROUND, false, true);  // erase old second hand
   tft->endWrite();
 }
 
@@ -518,16 +523,16 @@ void write_cache_point(uint8_t x, uint8_t y, uint16_t color, bool save, bool act
   }
 }
 
-void redraw_hands_cached_draw_and_earse()
+void redraw_hands_cached_draw_and_erase()
 {
   tft->startWrite();
-  draw_and_earse_cached_line(CENTER, CENTER, nsx, nsy, SECOND_COLOR, cached_points, SECOND_LEN + 1, false, false);
-  draw_and_earse_cached_line(CENTER, CENTER, nhx, nhy, HOUR_COLOR, cached_points + ((SECOND_LEN + 1) * 2), HOUR_LEN + 1, true, false);
-  draw_and_earse_cached_line(CENTER, CENTER, nmx, nmy, MINUTE_COLOR, cached_points + ((SECOND_LEN + 1 + HOUR_LEN + 1) * 2), MINUTE_LEN + 1, true, true);
+  draw_and_erase_cached_line(CENTER, CENTER, nsx, nsy, SECOND_COLOR, cached_points, SECOND_LEN + 1, false, false);
+  draw_and_erase_cached_line(CENTER, CENTER, nhx, nhy, HOUR_COLOR, cached_points + ((SECOND_LEN + 1) * 2), HOUR_LEN + 1, true, false);
+  draw_and_erase_cached_line(CENTER, CENTER, nmx, nmy, MINUTE_COLOR, cached_points + ((SECOND_LEN + 1 + HOUR_LEN + 1) * 2), MINUTE_LEN + 1, true, true);
   tft->endWrite();
 }
 
-void draw_and_earse_cached_line(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint16_t color, uint8_t *cache, uint16_t cache_len, bool cross_check_second, bool cross_check_hour)
+void draw_and_erase_cached_line(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint16_t color, uint8_t *cache, uint16_t cache_len, bool cross_check_second, bool cross_check_hour)
 {
 #if defined(ESP8266)
   yield();

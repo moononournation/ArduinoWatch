@@ -91,6 +91,9 @@ void setup(void)
   //draw_round_clock_mark(104, 120, 112, 120, 114, 114);
   draw_square_clock_mark(102, 120, 108, 120, 114, 120);
   DEBUG_PRINTMLN(": Draw 60 clock marks");
+
+  tft->setTextColor(WHITE, BLACK);
+  tft->setTextSize(2);
 }
 
 void loop()
@@ -189,37 +192,55 @@ void loop()
     switch (test_idx)
     {
     case 0:
-      DEBUG_PRINTMLN(": redraw_hands_erase_and_draw();");
+      tft->setCursor(0, 0);
+      tft->print(F("erase_and_draw   "));
+      DEBUG_PRINTMLN(F(": redraw_hands_erase_and_draw();"));
       break;
     case 1:
-      DEBUG_PRINTMLN(": redraw_hands_cached_lines();");
+      tft->setCursor(0, 0);
+      tft->print(F("overwrite_rect   "));
+      DEBUG_PRINTMLN(F(": redraw_hands_rect(overwrite_rect);"));
       break;
     case 2:
-      DEBUG_PRINTMLN(": redraw_hands_cached_draw_and_earse();");
+      tft->setCursor(0, 0);
+      tft->print(F("4_split(rect)    "));
+      DEBUG_PRINTMLN(F(": redraw_hands_4_split(overwrite_rect);"));
       break;
     case 3:
-      DEBUG_PRINTMLN(": redraw_hands_rect(overwrite_rect_no_draw_float);");
+      tft->setCursor(0, 0);
+      tft->print(F("4_split(spi_rect)"));
+      DEBUG_PRINTMLN(F(": redraw_hands_4_split(spi_raw_overwrite_rect);"));
       break;
     case 4:
-      DEBUG_PRINTMLN(": redraw_hands_rect(overwrite_rect_no_draw_int);");
+      tft->setCursor(0, 0);
+      tft->print(F("spi_draw&erase   "));
+      DEBUG_PRINTMLN(F(": redraw_hands_4_split(spi_raw_draw_and_erase);"));
       break;
     case 5:
-      DEBUG_PRINTMLN(": redraw_hands_rect(overwrite_rect_no_draw);");
+      tft->setCursor(0, 0);
+      tft->print(F("spi_cache_rect   "));
+      DEBUG_PRINTMLN(F(": redraw_hands_4_split(spi_raw_cache_overwrite_rect);"));
       break;
     case 6:
-      DEBUG_PRINTMLN(": redraw_hands_rect(overwrite_rect);");
+      tft->setCursor(0, 0);
+      tft->print(F("cached_lines     "));
+      DEBUG_PRINTMLN(F(": redraw_hands_cached_lines();"));
       break;
     case 7:
-      DEBUG_PRINTMLN(": redraw_hands_4_split(overwrite_rect);");
+      tft->setCursor(0, 0);
+      tft->print(F("cached_draw&erase"));
+      DEBUG_PRINTMLN(F(": redraw_hands_cached_draw_and_erase();"));
       break;
     case 8:
-      DEBUG_PRINTMLN(": redraw_hands_4_split(draw_and_erase);");
+      tft->setCursor(0, 0);
+      tft->print(F("                 "));
+      DEBUG_PRINTMLN(F(": redraw_hands_rect(overwrite_rect_no_draw_float);"));
       break;
     case 9:
-      DEBUG_PRINTMLN(": redraw_hands_4_split(spi_raw_overwrite_rect);");
+      DEBUG_PRINTMLN(F(": redraw_hands_rect(overwrite_rect_no_draw_int);"));
       break;
     case 10:
-      DEBUG_PRINTMLN(": redraw_hands_4_split(spi_raw_cache_overwrite_rect);");
+      DEBUG_PRINTMLN(F(": redraw_hands_rect(overwrite_rect_no_draw);"));
       break;
     }
     startMillis = millis();
@@ -256,37 +277,37 @@ void loop()
           redraw_hands_erase_and_draw();
           break;
         case 1:
-          redraw_hands_cached_lines();
-          break;
-        case 2:
-          redraw_hands_cached_draw_and_earse();
-          break;
-        case 3:
-          redraw_hands_rect(overwrite_rect_no_draw_float);
-          break;
-        case 4:
-          redraw_hands_rect(overwrite_rect_no_draw_int);
-          break;
-        case 5:
-          redraw_hands_rect(overwrite_rect_no_draw);
-          break;
-        case 6:
           redraw_hands_rect(overwrite_rect);
           break;
-        case 7:
+        case 2:
           redraw_hands_4_split(overwrite_rect);
           break;
-        case 8:
-          redraw_hands_4_split(draw_and_erase);
-          break;
-        case 9:
+        case 3:
           redraw_hands_4_split(spi_raw_overwrite_rect);
           break;
-        case 10:
+        case 4:
+          redraw_hands_4_split(spi_raw_draw_and_erase);
+          break;
+        case 5:
           cache_line_points(nsx, nsy, CENTER, CENTER, cached_points, SECOND_LEN + 1);
           cache_line_points(nhx, nhy, CENTER, CENTER, cached_points + ((SECOND_LEN + 1) * 2), HOUR_LEN + 1);
           cache_line_points(nmx, nmy, CENTER, CENTER, cached_points + ((SECOND_LEN + 1 + HOUR_LEN + 1) * 2), MINUTE_LEN + 1);
           redraw_hands_4_split(spi_raw_cache_overwrite_rect);
+          break;
+        case 6:
+          redraw_hands_cached_lines();
+          break;
+        case 7:
+          redraw_hands_cached_draw_and_erase();
+          break;
+        case 8:
+          redraw_hands_rect(overwrite_rect_no_draw_float);
+          break;
+        case 9:
+          redraw_hands_rect(overwrite_rect_no_draw_int);
+          break;
+        case 10:
+          redraw_hands_rect(overwrite_rect_no_draw);
           break;
         }
         ohx = nhx;
@@ -488,11 +509,11 @@ void redraw_hands_cached_lines()
   write_cached_line(nsx, nsy, CENTER, CENTER, SECOND_COLOR, true, false); // cache new second hand
   tft->startWrite();
   write_cached_line(nmx, nmy, CENTER, CENTER, MINUTE_COLOR, true, true); // cache and draw new minute hand
-  write_cached_line(omx, omy, CENTER, CENTER, BACKGROUND, false, true);  // earse old minute hand
+  write_cached_line(omx, omy, CENTER, CENTER, BACKGROUND, false, true);  // erase old minute hand
   tft->writeLine(nhx, nhy, CENTER, CENTER, HOUR_COLOR);                  // draw new hour hand
-  write_cached_line(ohx, ohy, CENTER, CENTER, BACKGROUND, false, true);  // earse old hour hand
+  write_cached_line(ohx, ohy, CENTER, CENTER, BACKGROUND, false, true);  // erase old hour hand
   tft->writeLine(nsx, nsy, CENTER, CENTER, SECOND_COLOR);                // draw new second hand
-  write_cached_line(osx, osy, CENTER, CENTER, BACKGROUND, false, true);  // earse old second hand
+  write_cached_line(osx, osy, CENTER, CENTER, BACKGROUND, false, true);  // erase old second hand
   tft->endWrite();
 }
 
@@ -586,9 +607,11 @@ void cache_line_points(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t *
 
   uint8_t err = dx / 2;
   int8_t ystep = (y0 < y1) ? 1 : -1;
+  int i = 0;
 
   for (; x0 <= x1; x0++)
   {
+    i++;
     if (steep)
     {
       *(cache++) = y0;
@@ -606,23 +629,23 @@ void cache_line_points(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t *
     }
     err -= dy;
   }
-  for (int i = x0 + 1; i < cache_size; i++)
+  for (; i < cache_size; i++)
   {
     *(cache++) = 0;
     *(cache++) = 0;
   }
 }
 
-void redraw_hands_cached_draw_and_earse()
+void redraw_hands_cached_draw_and_erase()
 {
   tft->startWrite();
-  draw_and_earse_cached_line(CENTER, CENTER, nsx, nsy, SECOND_COLOR, cached_points, SECOND_LEN + 1, false, false);
-  draw_and_earse_cached_line(CENTER, CENTER, nhx, nhy, HOUR_COLOR, cached_points + ((SECOND_LEN + 1) * 2), HOUR_LEN + 1, true, false);
-  draw_and_earse_cached_line(CENTER, CENTER, nmx, nmy, MINUTE_COLOR, cached_points + ((SECOND_LEN + 1 + HOUR_LEN + 1) * 2), MINUTE_LEN + 1, true, true);
+  draw_and_erase_cached_line(CENTER, CENTER, nsx, nsy, SECOND_COLOR, cached_points, SECOND_LEN + 1, false, false);
+  draw_and_erase_cached_line(CENTER, CENTER, nhx, nhy, HOUR_COLOR, cached_points + ((SECOND_LEN + 1) * 2), HOUR_LEN + 1, true, false);
+  draw_and_erase_cached_line(CENTER, CENTER, nmx, nmy, MINUTE_COLOR, cached_points + ((SECOND_LEN + 1 + HOUR_LEN + 1) * 2), MINUTE_LEN + 1, true, true);
   tft->endWrite();
 }
 
-void draw_and_earse_cached_line(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint16_t color, uint8_t *cache, uint16_t cache_len, bool cross_check_second, bool cross_check_hour)
+void draw_and_erase_cached_line(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint16_t color, uint8_t *cache, uint16_t cache_len, bool cross_check_second, bool cross_check_hour)
 {
 #if defined(ESP8266)
   yield();
@@ -887,7 +910,7 @@ void spi_raw_cache_overwrite_rect()
   tft->endWrite();
 }
 
-void draw_and_erase()
+void spi_raw_draw_and_erase()
 {
   tft->startWrite();
   for (uint8_t y = yMin; y <= yMax; y++)
