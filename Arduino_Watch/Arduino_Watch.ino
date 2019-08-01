@@ -40,13 +40,14 @@
 #define TFT_BL 22
 #define WAKEUP_PIN 36
 #else
+#define TFT_CS 20
 #define TFT_DC 19
 #define TFT_RST 18
 #define TFT_BL 10
 #define WAKEUP_PIN 7
 #define RTC_EN_PIN 4
 #endif
-#define LED_LEVEL 128
+//#define LED_LEVEL 128
 
 #include "Debug_Printer.h"
 #include <SPI.h>
@@ -59,7 +60,7 @@
 #if defined(ESP32)
 #include <esp_sleep.h>
 #elif defined(__AVR__)
-#include <LowPower.h>
+#include "LowPower.h"
 #endif
 #endif // #ifdef SLEEP_TIME
 
@@ -108,11 +109,7 @@ void setup(void)
   DEBUG_BEGIN(115200);
   DEBUG_PRINTMLN(": start");
 
-#if defined(ESP32)
-  tft->begin(80000000);
-#else
   tft->begin();
-#endif
   DEBUG_PRINTMLN(": tft->begin()");
 
   tft->fillScreen(BACKGROUND);
@@ -233,6 +230,7 @@ void backlight(bool enable)
 {
   if (enable)
   {
+#ifdef LED_LEVEL
 #if defined(ESP32)
     ledcAttachPin(TFT_BL, 1); // assign TFT_BL pin to channel 1
     ledcSetup(1, 12000, 8);   // 12 kHz PWM, 8-bit resolution
@@ -240,6 +238,9 @@ void backlight(bool enable)
 #else
     analogWrite(TFT_BL, LED_LEVEL);
 #endif
+#else
+    digitalWrite(TFT_BL, HIGH);
+#endif // #ifdef LED_LEVEL
     ledTurnedOn = true;
   }
   else
