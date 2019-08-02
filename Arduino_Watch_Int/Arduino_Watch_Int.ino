@@ -26,11 +26,9 @@
 #define MINUTE_LEN 85
 #define SECOND_LEN 100
 
-#define SIXTIETH 0.016666667
-#define TWELFTH 0.08333333
-#define SIXTIETH_RADIAN 0.10471976
-#define TWELFTH_RADIAN 0.52359878
-#define RIGHT_ANGLE_RADIAN 1.5707963
+#define SIXTIETH_DEGREE 6
+#define TWELFTH_DEGREE 30
+#define RIGHT_ANGLE_DEGREE 90
 #define CENTER 120
 
 #if defined(ESP32)
@@ -47,9 +45,10 @@
 #define WAKEUP_PIN 7
 // #define RTC_EN_PIN 4
 #endif
-//#define LED_LEVEL 128
+// #define LED_LEVEL 128
 
 #include "Debug_Printer.h"
+#include "IntTrigonometry.h"
 #include <SPI.h>
 #include <Arduino_HWSPI.h>
 #include <Arduino_GFX.h>
@@ -87,7 +86,7 @@ Arduino_ST7789 *tft = new Arduino_ST7789(bus, TFT_RST, 0 /* rotation */, true /*
 // 2.4" LCD
 // Arduino_ST7789 *tft = new Arduino_ST7789(bus, TFT_RST, 1 /* rotation */);
 
-static float sdeg, mdeg, hdeg;
+static int isdeg, imdeg, ihdeg;
 static uint8_t osx = CENTER, osy = CENTER, omx = CENTER, omy = CENTER, ohx = CENTER, ohy = CENTER; // Saved H, M, S x & y coords
 static uint8_t nsx, nsy, nmx, nmy, nhx, nhy;                                                       // H, M, S x & y coords
 static uint8_t xMin, yMin, xMax, yMax;                                                             // redraw range
@@ -166,24 +165,23 @@ void loop()
   }
 
   // Pre-compute hand degrees, x & y coords for a fast screen update
-  sdeg = SIXTIETH_RADIAN * ((0.001 * (cur_millis % 1000)) + ss); // 0-59 (includes millis)
-  nsx = cos(sdeg - RIGHT_ANGLE_RADIAN) * SECOND_LEN + CENTER;
-  nsy = sin(sdeg - RIGHT_ANGLE_RADIAN) * SECOND_LEN + CENTER;
+  isdeg = (SIXTIETH_DEGREE * (cur_millis % 1000) / 1000) + (SIXTIETH_DEGREE * ss); // 0-59 (includes millis)
+  nsx = iCos(isdeg - RIGHT_ANGLE_DEGREE) * SECOND_LEN / I_SCALE + CENTER;
+  nsy = iSin(isdeg - RIGHT_ANGLE_DEGREE) * SECOND_LEN / I_SCALE + CENTER;
   if ((nsx != osx) || (nsy != osy))
   {
-    mdeg = (SIXTIETH * sdeg) + (SIXTIETH_RADIAN * mm); // 0-59 (includes seconds)
-    hdeg = (TWELFTH * mdeg) + (TWELFTH_RADIAN * hh);   // 0-11 (includes minutes)
-    mdeg -= RIGHT_ANGLE_RADIAN;
-    hdeg -= RIGHT_ANGLE_RADIAN;
-    nmx = cos(mdeg) * MINUTE_LEN + CENTER;
-    nmy = sin(mdeg) * MINUTE_LEN + CENTER;
-    nhx = cos(hdeg) * HOUR_LEN + CENTER;
-    nhy = sin(hdeg) * HOUR_LEN + CENTER;
+    imdeg = (isdeg / 60) + (SIXTIETH_DEGREE * mm); // 0-59 (includes seconds)
+    ihdeg = (imdeg / 12) + (TWELFTH_DEGREE * hh);  // 0-11 (includes minutes)
+    imdeg -= RIGHT_ANGLE_DEGREE;
+    ihdeg -= RIGHT_ANGLE_DEGREE;
+    nmx = iCos(imdeg) * MINUTE_LEN / I_SCALE + CENTER;
+    nmy = iSin(imdeg) * MINUTE_LEN / I_SCALE + CENTER;
+    nhx = iCos(ihdeg) * HOUR_LEN / I_SCALE + CENTER;
+    nhy = iSin(ihdeg) * HOUR_LEN / I_SCALE + CENTER;
 
     // redraw hands
-    // redraw_hands_4_split(spi_raw_overwrite_rect);
     // redraw_hands_cached_lines();
-    redraw_hands_cached_draw_and_erase();
+    redraw_hands_cached_draw_and_earse();
 
     ohx = nhx;
     ohy = nhy;
@@ -289,8 +287,8 @@ void enterSleep()
   esp_sleep_enable_gpio_wakeup();
   esp_light_sleep_start();
 #elif defined(__AVR__)
-  // Allow wake up pin to trigger interrupt on low.
-  attachInterrupt(digitalPinToInterrupt(WAKEUP_PIN), wakeUp, LOW);
+  // Allow wake up pin to trigger interrupt when the pin goes from high to low.
+  attachInterrupt(digitalPinToInterrupt(WAKEUP_PIN), wakeUp, FALLING);
 
   // Enter power down state with ADC and BOD module disabled.
   // Wake up when wake up pin is low.
@@ -324,7 +322,7 @@ void wakeUp()
 
 void draw_round_clock_mark(uint8_t innerR1, uint8_t outerR1, uint8_t innerR2, uint8_t outerR2, uint8_t innerR3, uint8_t outerR3)
 {
-  float x, y;
+  int x, y;
   uint8_t x0, x1, y0, y1, innerR, outerR;
   uint16_t c;
 
@@ -349,13 +347,13 @@ void draw_round_clock_mark(uint8_t innerR1, uint8_t outerR1, uint8_t innerR2, ui
       c = SUBMARK_COLOR;
     }
 
-    mdeg = (SIXTIETH_RADIAN * i) - RIGHT_ANGLE_RADIAN;
-    x = cos(mdeg);
-    y = sin(mdeg);
-    x0 = x * outerR + CENTER;
-    y0 = y * outerR + CENTER;
-    x1 = x * innerR + CENTER;
-    y1 = y * innerR + CENTER;
+    imdeg = (SIXTIETH_DEGREE * i) - RIGHT_ANGLE_DEGREE;
+    x = iCos(imdeg);
+    y = iSin(imdeg);
+    x0 = x * outerR / I_SCALE + CENTER;
+    y0 = y * outerR / I_SCALE + CENTER;
+    x1 = x * innerR / I_SCALE + CENTER;
+    y1 = y * innerR / I_SCALE + CENTER;
 
     tft->drawLine(x0, y0, x1, y1, c);
     DEBUG_PRINTM(" i: ");
@@ -373,7 +371,7 @@ void draw_round_clock_mark(uint8_t innerR1, uint8_t outerR1, uint8_t innerR2, ui
 
 void draw_square_clock_mark(uint8_t innerR1, uint8_t outerR1, uint8_t innerR2, uint8_t outerR2, uint8_t innerR3, uint8_t outerR3)
 {
-  float x, y;
+  int x, y;
   uint8_t x0, x1, y0, y1, innerR, outerR;
   uint16_t c;
 
@@ -400,35 +398,35 @@ void draw_square_clock_mark(uint8_t innerR1, uint8_t outerR1, uint8_t innerR2, u
 
     if ((i >= 53) || (i < 8))
     {
-      x = tan(SIXTIETH_RADIAN * i);
-      x0 = CENTER + (x * outerR);
+      x = iTan(SIXTIETH_DEGREE * i);
+      x0 = CENTER + (x * outerR / I_SCALE);
       y0 = CENTER + (1 - outerR);
-      x1 = CENTER + (x * innerR);
+      x1 = CENTER + (x * innerR / I_SCALE);
       y1 = CENTER + (1 - innerR);
     }
     else if (i < 23)
     {
-      y = tan((SIXTIETH_RADIAN * i) - RIGHT_ANGLE_RADIAN);
+      y = iTan((SIXTIETH_DEGREE * i) - RIGHT_ANGLE_DEGREE);
       x0 = CENTER + (outerR);
-      y0 = CENTER + (y * outerR);
+      y0 = CENTER + (y * outerR / I_SCALE);
       x1 = CENTER + (innerR);
-      y1 = CENTER + (y * innerR);
+      y1 = CENTER + (y * innerR / I_SCALE);
     }
     else if (i < 38)
     {
-      x = tan(SIXTIETH_RADIAN * i);
-      x0 = CENTER - (x * outerR);
+      x = iTan(SIXTIETH_DEGREE * i);
+      x0 = CENTER - (x * outerR / I_SCALE);
       y0 = CENTER + (outerR);
-      x1 = CENTER - (x * innerR);
+      x1 = CENTER - (x * innerR / I_SCALE);
       y1 = CENTER + (innerR);
     }
     else if (i < 53)
     {
-      y = tan((SIXTIETH_RADIAN * i) - RIGHT_ANGLE_RADIAN);
+      y = iTan((SIXTIETH_DEGREE * i) - RIGHT_ANGLE_DEGREE);
       x0 = CENTER + (1 - outerR);
-      y0 = CENTER - (y * outerR);
+      y0 = CENTER - (y * outerR / I_SCALE);
       x1 = CENTER + (1 - innerR);
-      y1 = CENTER - (y * innerR);
+      y1 = CENTER - (y * innerR / I_SCALE);
     }
     tft->drawLine(x0, y0, x1, y1, c);
     DEBUG_PRINTM(" i: ");
@@ -452,11 +450,11 @@ void redraw_hands_cached_lines()
   write_cached_line(nsx, nsy, CENTER, CENTER, SECOND_COLOR, true, false); // cache new second hand
   tft->startWrite();
   write_cached_line(nmx, nmy, CENTER, CENTER, MINUTE_COLOR, true, true); // cache and draw new minute hand
-  write_cached_line(omx, omy, CENTER, CENTER, BACKGROUND, false, true);  // erase old minute hand
+  write_cached_line(omx, omy, CENTER, CENTER, BACKGROUND, false, true);  // earse old minute hand
   tft->writeLine(nhx, nhy, CENTER, CENTER, HOUR_COLOR);                  // draw new hour hand
-  write_cached_line(ohx, ohy, CENTER, CENTER, BACKGROUND, false, true);  // erase old hour hand
+  write_cached_line(ohx, ohy, CENTER, CENTER, BACKGROUND, false, true);  // earse old hour hand
   tft->writeLine(nsx, nsy, CENTER, CENTER, SECOND_COLOR);                // draw new second hand
-  write_cached_line(osx, osy, CENTER, CENTER, BACKGROUND, false, true);  // erase old second hand
+  write_cached_line(osx, osy, CENTER, CENTER, BACKGROUND, false, true);  // earse old second hand
   tft->endWrite();
 }
 
@@ -526,16 +524,16 @@ void write_cache_point(uint8_t x, uint8_t y, uint16_t color, bool save, bool act
   }
 }
 
-void redraw_hands_cached_draw_and_erase()
+void redraw_hands_cached_draw_and_earse()
 {
   tft->startWrite();
-  draw_and_erase_cached_line(CENTER, CENTER, nsx, nsy, SECOND_COLOR, cached_points, SECOND_LEN + 1, false, false);
-  draw_and_erase_cached_line(CENTER, CENTER, nhx, nhy, HOUR_COLOR, cached_points + ((SECOND_LEN + 1) * 2), HOUR_LEN + 1, true, false);
-  draw_and_erase_cached_line(CENTER, CENTER, nmx, nmy, MINUTE_COLOR, cached_points + ((SECOND_LEN + 1 + HOUR_LEN + 1) * 2), MINUTE_LEN + 1, true, true);
+  draw_and_earse_cached_line(CENTER, CENTER, nsx, nsy, SECOND_COLOR, cached_points, SECOND_LEN + 1, false, false);
+  draw_and_earse_cached_line(CENTER, CENTER, nhx, nhy, HOUR_COLOR, cached_points + ((SECOND_LEN + 1) * 2), HOUR_LEN + 1, true, false);
+  draw_and_earse_cached_line(CENTER, CENTER, nmx, nmy, MINUTE_COLOR, cached_points + ((SECOND_LEN + 1 + HOUR_LEN + 1) * 2), MINUTE_LEN + 1, true, true);
   tft->endWrite();
 }
 
-void draw_and_erase_cached_line(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint16_t color, uint8_t *cache, uint16_t cache_len, bool cross_check_second, bool cross_check_hour)
+void draw_and_earse_cached_line(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint16_t color, uint8_t *cache, uint16_t cache_len, bool cross_check_second, bool cross_check_hour)
 {
 #if defined(ESP8266)
   yield();
@@ -634,166 +632,4 @@ void write_cache_pixel(uint8_t x, uint8_t y, uint16_t color, bool cross_check_se
     }
   }
   tft->writePixel(x, y, color);
-}
-
-void redraw_hands_4_split(void (*redrawFunc)())
-{
-  if (inSplitRange(1, 1, CENTER, CENTER))
-  {
-    redrawFunc();
-  }
-
-  if (inSplitRange(CENTER + 1, 1, CENTER * 2, CENTER))
-  {
-    redrawFunc();
-  }
-
-  if (inSplitRange(1, CENTER + 1, CENTER, CENTER * 2))
-  {
-    redrawFunc();
-  }
-
-  if (inSplitRange(CENTER + 1, CENTER + 1, CENTER * 2, CENTER * 2))
-  {
-    redrawFunc();
-  }
-}
-
-void spi_raw_overwrite_rect()
-{
-  tft->startWrite();
-  tft->writeAddrWindow(xMin, yMin, xMax - xMin + 1, yMax - yMin + 1);
-  for (uint8_t y = yMin; y <= yMax; y++)
-  {
-    for (uint8_t x = xMin; x <= xMax; x++)
-    {
-      if (inLine(x, y, nsx, nsy, CENTER, CENTER))
-      {
-        tft->writeColor(SECOND_COLOR); // draw second hand
-      }
-      else if (inLine(x, y, nhx, nhy, CENTER, CENTER))
-      {
-        tft->writeColor(HOUR_COLOR); // draw hour hand
-      }
-      else if (inLine(x, y, nmx, nmy, CENTER, CENTER))
-      {
-        tft->writeColor(MINUTE_COLOR); // draw minute hand
-      }
-      else
-      {
-        tft->writeColor(BACKGROUND); // over write background color
-      }
-    }
-  }
-  tft->endWrite();
-}
-
-bool inSplitRange(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1)
-{
-  bool in_range = false;
-
-  xMin = CENTER;
-  yMin = CENTER;
-  xMax = CENTER;
-  yMax = CENTER;
-
-  if (_ordered_in_range(ohx, x0, x1) && _ordered_in_range(ohy, y0, y1))
-  {
-    in_range = true;
-    xMin = min(xMin, ohx);
-    xMax = max(xMax, ohx);
-    yMin = min(yMin, ohy);
-    yMax = max(yMax, ohy);
-  }
-
-  if (_ordered_in_range(omx, x0, x1) && _ordered_in_range(omy, y0, y1))
-  {
-    in_range = true;
-    xMin = min(xMin, omx);
-    xMax = max(xMax, omx);
-    yMin = min(yMin, omy);
-    yMax = max(yMax, omy);
-  }
-
-  if (_ordered_in_range(osx, x0, x1) && _ordered_in_range(osy, y0, y1))
-  {
-    in_range = true;
-    xMin = min(xMin, osx);
-    xMax = max(xMax, osx);
-    yMin = min(yMin, osy);
-    yMax = max(yMax, osy);
-  }
-
-  if (_ordered_in_range(nhx, x0, x1) && _ordered_in_range(nhy, y0, y1))
-  {
-    in_range = true;
-    xMin = min(xMin, nhx);
-    xMax = max(xMax, nhx);
-    yMin = min(yMin, nhy);
-    yMax = max(yMax, nhy);
-  }
-
-  if (_ordered_in_range(nmx, x0, x1) && _ordered_in_range(nmy, y0, y1))
-  {
-    in_range = true;
-    xMin = min(xMin, nmx);
-    xMax = max(xMax, nmx);
-    yMin = min(yMin, nmy);
-    yMax = max(yMax, nmy);
-  }
-
-  if (_ordered_in_range(nsx, x0, x1) && _ordered_in_range(nsy, y0, y1))
-  {
-    in_range = true;
-    xMin = min(xMin, nsx);
-    xMax = max(xMax, nsx);
-    yMin = min(yMin, nsy);
-    yMax = max(yMax, nsy);
-  }
-
-  return in_range;
-}
-
-bool inLine(uint8_t x, uint8_t y, uint8_t lx0, uint8_t ly0, uint8_t lx1, uint8_t ly1)
-{
-  // range checking
-  if (!_in_range(x, lx0, lx1))
-  {
-    return false;
-  }
-  if (!_in_range(y, ly0, ly1))
-  {
-    return false;
-  }
-
-  uint8_t dx = _diff(lx1, lx0);
-  uint8_t dy = _diff(ly1, ly0);
-
-  if (dy > dx)
-  {
-    _swap_uint8_t(dx, dy);
-    _swap_uint8_t(x, y);
-    _swap_uint8_t(lx0, ly0);
-    _swap_uint8_t(lx1, ly1);
-  }
-
-  if (lx0 > lx1)
-  {
-    _swap_uint8_t(lx0, lx1);
-    _swap_uint8_t(ly0, ly1);
-  }
-
-  uint8_t err = dx >> 1;
-  int8_t ystep = (ly0 < ly1) ? 1 : -1;
-  for (; lx0 <= x; lx0++)
-  {
-    if (err < dy)
-    {
-      ly0 += ystep;
-      err += dx;
-    }
-    err -= dy;
-  }
-
-  return (y == ly0);
 }
