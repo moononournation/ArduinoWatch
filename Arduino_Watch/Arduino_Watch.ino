@@ -50,11 +50,7 @@
 //#define LED_LEVEL 128
 
 #include "Debug_Printer.h"
-#include <SPI.h>
-#include <Arduino_HWSPI.h>
-#include <Arduino_GFX.h>
-#include <Arduino_TFT.h>
-#include <Arduino_ST7789.h> // Hardware-specific library for ST7789 (with or without CS pin)
+#include <Arduino_GFX_Library.h>
 
 #ifdef SLEEP_TIME
 #if defined(ESP32)
@@ -83,7 +79,7 @@ Arduino_HWSPI *bus = new Arduino_HWSPI(TFT_DC, TFT_CS);
 Arduino_HWSPI *bus = new Arduino_HWSPI(TFT_DC); //for display without CS pin
 #endif
 // 1.3"/1.5" square IPS LCD 240x240
-Arduino_ST7789 *tft = new Arduino_ST7789(bus, TFT_RST, 0 /* rotation */, true /* IPS */, 240 /* width */, 240 /* height */, 0 /* col offset 1 */, 80 /* row offset 1 */);
+Arduino_ST7789 *tft = new Arduino_ST7789(bus, TFT_RST, 2 /* rotation */, true /* IPS */, 240 /* width */, 240 /* height */, 0 /* col offset 1 */, 80 /* row offset 1 */);
 // 2.4" LCD
 // Arduino_ST7789 *tft = new Arduino_ST7789(bus, TFT_RST, 1 /* rotation */);
 

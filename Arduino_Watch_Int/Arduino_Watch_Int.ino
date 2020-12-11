@@ -49,11 +49,7 @@
 
 #include "Debug_Printer.h"
 #include "IntTrigonometry.h"
-#include <SPI.h>
-#include <Arduino_HWSPI.h>
-#include <Arduino_GFX.h>
-#include <Arduino_TFT.h>
-#include <Arduino_ST7789.h> // Hardware-specific library for ST7789 (with or without CS pin)
+#include <Arduino_GFX_Library.h>
 
 #ifdef SLEEP_TIME
 #if defined(ESP32)
