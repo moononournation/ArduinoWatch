@@ -5,6 +5,9 @@
    - shutdown power after 60 seconds
    - press power button to restart
 */
+#include "Debug_Printer.h"
+#include <Arduino_GFX_Library.h>
+
 // real time clock class
 // comment out if no RTC at all
 // #define RTC_CLASS RTC_DS1307
@@ -49,9 +52,6 @@
 #endif
 //#define LED_LEVEL 128
 
-#include "Debug_Printer.h"
-#include <Arduino_GFX_Library.h>
-
 #ifdef SLEEP_TIME
 #if defined(ESP32)
 #include <esp_sleep.h>
@@ -73,15 +73,9 @@ static uint8_t conv2d(const char *p)
 #endif
 
 //You can use different type of hardware initialization
-#ifdef TFT_CS
 Arduino_HWSPI *bus = new Arduino_HWSPI(TFT_DC, TFT_CS);
-#else
-Arduino_HWSPI *bus = new Arduino_HWSPI(TFT_DC); //for display without CS pin
-#endif
 // 1.3"/1.5" square IPS LCD 240x240
-Arduino_ST7789 *tft = new Arduino_ST7789(bus, TFT_RST, 2 /* rotation */, true /* IPS */, 240 /* width */, 240 /* height */, 0 /* col offset 1 */, 80 /* row offset 1 */);
-// 2.4" LCD
-// Arduino_ST7789 *tft = new Arduino_ST7789(bus, TFT_RST, 1 /* rotation */);
+Arduino_TFT *tft = new Arduino_ST7789(bus, TFT_RST, 2 /* rotation */, true /* IPS */, 240 /* width */, 240 /* height */, 0 /* col offset 1 */, 80 /* row offset 1 */);
 
 static float sdeg, mdeg, hdeg;
 static uint8_t osx = CENTER, osy = CENTER, omx = CENTER, omy = CENTER, ohx = CENTER, ohy = CENTER; // Saved H, M, S x & y coords
@@ -226,6 +220,9 @@ void backlight(bool enable)
 {
   if (enable)
   {
+#ifdef DEBUG_MODE
+    DEBUG_PRINTLN("enable backlight");
+#endif
 #ifdef LED_LEVEL
 #if defined(ESP32)
     ledcAttachPin(TFT_BL, 1); // assign TFT_BL pin to channel 1
@@ -241,6 +238,9 @@ void backlight(bool enable)
   }
   else
   {
+#ifdef DEBUG_MODE
+    DEBUG_PRINTLN("disable backlight");
+#endif
     digitalWrite(TFT_BL, LOW);
     ledTurnedOn = false;
   }
