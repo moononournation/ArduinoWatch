@@ -226,8 +226,8 @@ void backlight(bool enable)
   {
 #ifdef LED_LEVEL
 #if defined(ESP32)
-    ledcAttachPin(TFT_BL, 1); // assign TFT_BL pin to channel 1
     ledcSetup(1, 12000, 8);   // 12 kHz PWM, 8-bit resolution
+    ledcAttachPin(TFT_BL, 1); // assign TFT_BL pin to channel 1
     ledcWrite(1, LED_LEVEL);  // brightness 0 - 255
 #else
     analogWrite(TFT_BL, LED_LEVEL);
